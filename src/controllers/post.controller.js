@@ -1,24 +1,40 @@
 import Post from "../models/post.message.model.js";
 import cloudinary from "../lib/cloudinary.js";
+import mongoose from "mongoose";
 
 // Get all posts
 export const getAllPosts = async (req, res) => {
   try {
+    // Lấy thông tin người dùng hiện tại (nếu đã đăng nhập)
+    const currentUserId = req.user ? req.user._id : null;
+    
+    // Lấy tất cả bài viết và populate thông tin tác giả
     const posts = await Post.find()
-      .sort({ createdAt: -1 }) // Most recent first
+      .sort({ createdAt: -1 }) // Mới nhất trước
       .populate("author", "-password");
-
-    // Transform the data to match the example format
-    const formattedPosts = posts.map(post => ({
-      id: post._id,
-      author: post.author,
-      timestamp: formatTimestamp(post.createdAt),
-      content: post.content,
-      likes: post.likes,
-      comments: post.comments,
-      images: post.images
-    }));
-
+    
+    // Biến đổi dữ liệu để phù hợp với định dạng mẫu
+    const formattedPosts = posts.map(post => {
+      // Kiểm tra xem người dùng hiện tại đã like bài viết này chưa
+      // Chỉ khi người dùng đã đăng nhập và ID của họ có trong mảng likedBy
+      const isLiked = currentUserId ? 
+        post.likedBy.some(likedById => likedById.toString() === currentUserId.toString()) : 
+        false;
+      
+      console.log(`Post ${post._id}: User ${currentUserId} isLiked = ${isLiked}, likedBy = [${post.likedBy.map(id => id.toString())}]`);
+      
+      return {
+        id: post._id,
+        author: post.author,
+        timestamp: formatTimestamp(post.createdAt),
+        content: post.content,
+        likes: post.likes,
+        comments: post.comments,
+        images: post.images,
+        isLiked: isLiked // Thêm thông tin về việc người dùng hiện tại đã like bài viết này chưa
+      };
+    });
+    
     res.status(200).json(formattedPosts);
   } catch (error) {
     console.error("Error in getAllPosts controller: ", error.message);
@@ -30,14 +46,24 @@ export const getAllPosts = async (req, res) => {
 export const getPostById = async (req, res) => {
   try {
     const { id } = req.params;
+    // Lấy thông tin người dùng hiện tại (nếu đã đăng nhập)
+    const currentUserId = req.user ? req.user._id : null;
+    
     const post = await Post.findById(id)
       .populate("author", "-password");
-
+    
     if (!post) {
       return res.status(404).json({ message: "Post not found" });
     }
-
-    // Format post to match example
+    
+    // Kiểm tra xem người dùng hiện tại đã like bài viết này chưa
+    const isLiked = currentUserId ? 
+      post.likedBy.some(likedById => likedById.toString() === currentUserId.toString()) : 
+      false;
+    
+    console.log(`Post ${post._id}: User ${currentUserId} isLiked = ${isLiked}, likedBy = [${post.likedBy.map(id => id.toString())}]`);
+    
+    // Định dạng bài viết để phù hợp với mẫu
     const formattedPost = {
       id: post._id,
       author: post.author,
@@ -45,11 +71,11 @@ export const getPostById = async (req, res) => {
       content: post.content,
       likes: post.likes,
       comments: post.comments,
-      images: post.images
+      images: post.images,
+      isLiked: isLiked // Thêm thông tin về việc người dùng hiện tại đã like bài viết này chưa
     };
-
-    res.status(200).json(formattedPost);
     
+    res.status(200).json(formattedPost);
   } catch (error) {
     console.error("Error in getPostById controller: ", error.message);
     res.status(500).json({ error: "Internal server error" });
@@ -120,7 +146,8 @@ export const createPost = async (req, res) => {
       content: savedPost.content,
       likes: 0,
       comments: 0,
-      images: savedPost.images
+      images: savedPost.images,
+      isLiked: false // New post, not liked yet
     };
 
     res.status(201).json(formattedPost);
@@ -180,6 +207,9 @@ export const updatePost = async (req, res) => {
       { new: true }
     ).populate("author", "-password");
 
+    // Check if the current user has liked this post
+    const isLiked = updatedPost.likedBy.some(id => id.toString() === req.user._id.toString());
+
     // Format for response
     const formattedPost = {
       id: updatedPost._id,
@@ -188,7 +218,8 @@ export const updatePost = async (req, res) => {
       content: updatedPost.content,
       likes: updatedPost.likes,
       comments: updatedPost.comments,
-      images: updatedPost.images
+      images: updatedPost.images,
+      isLiked: isLiked
     };
 
     res.status(200).json(formattedPost);
@@ -221,6 +252,187 @@ export const deletePost = async (req, res) => {
     res.status(200).json({ message: "Post deleted successfully" });
   } catch (error) {
     console.error("Error in deletePost controller: ", error.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// Like a post
+export const likePost = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+    
+    // Validate the post ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid post ID format" });
+    }
+
+    const post = await Post.findById(id);
+    
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+    
+    // Check if user already liked the post - convert ObjectIds to strings for comparison
+    const alreadyLiked = post.likedBy.some(id => id.toString() === userId.toString());
+    
+    if (alreadyLiked) {
+      return res.status(400).json({ 
+        message: "Post already liked", 
+        isLiked: true,
+        id: post._id,
+        likes: post.likes
+      });
+    }
+    
+    // Add user to likedBy array and increment likes count
+    const updatedPost = await Post.findByIdAndUpdate(
+      id,
+      { 
+        $addToSet: { likedBy: userId },
+        $inc: { likes: 1 }
+      },
+      { new: true }
+    );
+    
+    // Check if update was successful
+    if (!updatedPost) {
+      return res.status(500).json({ message: "Failed to update post" });
+    }
+    
+    // Log for debugging
+    console.log("Like successful:", {
+      postId: id,
+      userId: userId.toString(),
+      likedBy: updatedPost.likedBy.map(id => id.toString()),
+      isLiked: updatedPost.likedBy.some(id => id.toString() === userId.toString())
+    });
+    
+    res.status(200).json({ 
+      id: updatedPost._id,
+      likes: updatedPost.likes,
+      isLiked: true
+    });
+  } catch (error) {
+    console.error("Error in likePost controller: ", error);
+    res.status(500).json({ error: "Internal server error", details: error.toString() });
+  }
+};
+
+// Unlike a post
+export const unlikePost = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+    
+    // Validate the post ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid post ID format" });
+    }
+    
+    const post = await Post.findById(id);
+    
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+    
+    // Check if user has liked the post - convert ObjectIds to strings
+    const hasLiked = post.likedBy.some(id => id.toString() === userId.toString());
+    
+    if (!hasLiked) {
+      return res.status(400).json({ 
+        message: "Post not liked yet", 
+        isLiked: false,
+        id: post._id,
+        likes: post.likes
+      });
+    }
+    
+    // Remove user from likedBy array and decrement likes count
+    const updatedPost = await Post.findByIdAndUpdate(
+      id,
+      { 
+        $pull: { likedBy: userId },
+        $inc: { likes: -1 }
+      },
+      { new: true }
+    );
+    
+    // Check if update was successful
+    if (!updatedPost) {
+      return res.status(500).json({ message: "Failed to update post" });
+    }
+    
+    // Log for debugging
+    console.log("Unlike successful:", {
+      postId: id,
+      userId: userId.toString(),
+      likedBy: updatedPost.likedBy.map(id => id.toString()),
+      isLiked: updatedPost.likedBy.some(id => id.toString() === userId.toString())
+    });
+    
+    res.status(200).json({ 
+      id: updatedPost._id,
+      likes: updatedPost.likes,
+      isLiked: false
+    });
+  } catch (error) {
+    console.error("Error in unlikePost controller: ", error);
+    res.status(500).json({ error: "Internal server error", details: error.toString() });
+  }
+};
+
+// Get all posts liked by the current user
+export const getLikedPosts = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    const likedPosts = await Post.find({ likedBy: userId })
+      .sort({ createdAt: -1 })
+      .populate("author", "-password");
+    
+    // Transform the data to match the example format
+    const formattedPosts = likedPosts.map(post => ({
+      id: post._id,
+      author: post.author,
+      timestamp: formatTimestamp(post.createdAt),
+      content: post.content,
+      likes: post.likes,
+      comments: post.comments,
+      images: post.images,
+      isLiked: true // All posts in this list are liked by the user
+    }));
+    
+    res.status(200).json(formattedPosts);
+  } catch (error) {
+    console.error("Error in getLikedPosts controller: ", error.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// Check if user has liked a specific post
+export const checkIfLiked = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+    
+    // Validate the post ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid post ID format" });
+    }
+    
+    const post = await Post.findById(id);
+    
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+    
+    // Check if user has liked the post
+    const isLiked = post.likedBy.some(likedById => likedById.toString() === userId.toString());
+    
+    res.status(200).json({ isLiked });
+  } catch (error) {
+    console.error("Error in checkIfLiked controller: ", error.message);
     res.status(500).json({ error: "Internal server error" });
   }
 };

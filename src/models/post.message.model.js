@@ -20,6 +20,11 @@ const postSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // Thêm mảng likedBy để lưu danh sách người đã thích bài viết
+    likedBy: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    }],
     comments: {
       type: Number,
       default: 0,

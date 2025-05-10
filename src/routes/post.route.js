@@ -5,7 +5,11 @@ import {
   getPostById, 
   createPost, 
   updatePost, 
-  deletePost 
+  deletePost,
+  likePost,
+  unlikePost,
+  getLikedPosts,
+  checkIfLiked
 } from "../controllers/post.controller.js";
 
 const router = express.Router();
@@ -18,5 +22,11 @@ router.get("/:id", getPostById);
 router.post("/", protectRoute, createPost);
 router.put("/:id", protectRoute, updatePost);
 router.delete("/:id", protectRoute, deletePost);
+
+// Like functionality
+router.post("/like/:id", protectRoute, likePost);
+router.post("/unlike/:id", protectRoute, unlikePost);
+router.get("/liked/me", protectRoute, getLikedPosts);
+router.get("/check-like/:id", protectRoute, checkIfLiked);
 
 export default router;
