@@ -21,8 +21,6 @@ export const getAllPosts = async (req, res) => {
         post.likedBy.some(likedById => likedById.toString() === currentUserId.toString()) : 
         false;
       
-      console.log(`Post ${post._id}: User ${currentUserId} isLiked = ${isLiked}, likedBy = [${post.likedBy.map(id => id.toString())}]`);
-      
       return {
         id: post._id,
         author: post.author,
@@ -61,7 +59,7 @@ export const getPostById = async (req, res) => {
       post.likedBy.some(likedById => likedById.toString() === currentUserId.toString()) : 
       false;
     
-    console.log(`Post ${post._id}: User ${currentUserId} isLiked = ${isLiked}, likedBy = [${post.likedBy.map(id => id.toString())}]`);
+   
     
     // Định dạng bài viết để phù hợp với mẫu
     const formattedPost = {
@@ -133,7 +131,6 @@ export const createPost = async (req, res) => {
     });
 
     const savedPost = await newPost.save();
-    console.log("Saved post:", savedPost);
 
     // Format for response
     const formattedPost = {
@@ -300,13 +297,7 @@ export const likePost = async (req, res) => {
       return res.status(500).json({ message: "Failed to update post" });
     }
     
-    // Log for debugging
-    console.log("Like successful:", {
-      postId: id,
-      userId: userId.toString(),
-      likedBy: updatedPost.likedBy.map(id => id.toString()),
-      isLiked: updatedPost.likedBy.some(id => id.toString() === userId.toString())
-    });
+
     
     res.status(200).json({ 
       id: updatedPost._id,
@@ -362,15 +353,6 @@ export const unlikePost = async (req, res) => {
     if (!updatedPost) {
       return res.status(500).json({ message: "Failed to update post" });
     }
-    
-    // Log for debugging
-    console.log("Unlike successful:", {
-      postId: id,
-      userId: userId.toString(),
-      likedBy: updatedPost.likedBy.map(id => id.toString()),
-      isLiked: updatedPost.likedBy.some(id => id.toString() === userId.toString())
-    });
-    
     res.status(200).json({ 
       id: updatedPost._id,
       likes: updatedPost.likes,
@@ -416,18 +398,13 @@ export const checkIfLiked = async (req, res) => {
     const { id } = req.params;
     const userId = req.user._id;
     
-    // Validate the post ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: "Invalid post ID format" });
     }
-    
     const post = await Post.findById(id);
-    
     if (!post) {
       return res.status(404).json({ message: "Post not found" });
     }
-    
-    // Check if user has liked the post
     const isLiked = post.likedBy.some(likedById => likedById.toString() === userId.toString());
     
     res.status(200).json({ isLiked });
